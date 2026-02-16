@@ -1,10 +1,10 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import { SideNav } from '@/components/ui/SideNav';
+import { TopNav } from '@/components/ui/TopNav';
 
 export const metadata: Metadata = {
-  title: { default: 'FinTrack', template: '%s · FinTrack' },
-  description: 'Personal financial tracker — built on Next.js + AWS',
+  title: { default: 'JobSignal — Job Market Intelligence', template: '%s · JobSignal' },
+  description: 'See which fields are underrepresented, where competition is low, and where you have the best shot.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -13,11 +13,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+        <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
       </head>
-      <body style={{ display: 'flex', minHeight: '100vh' }}>
-        <SideNav />
-        <main style={{ flex: 1, minWidth: 0, padding: '40px 40px 40px 32px' }}>
+      <body>
+        <TopNav />
+        <main style={{ maxWidth: '1320px', margin: '0 auto', padding: '36px 28px 80px' }}>
           {children}
         </main>
       </body>

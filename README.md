@@ -1,71 +1,22 @@
-# FinTrack — Financial Tracker
+# JobSignal — Job Market Intelligence
 
-> Migrated from a 6-line Express "Hello World" to a production-grade Next.js application on AWS EC2 with DynamoDB, CloudWatch, and a least-privilege IAM role.
-
----
-
-## What changed from your original `app.js`
-
-| Before | After |
-|---|---|
-| `var express = require('express')` | Next.js 14 App Router (no Express needed) |
-| `res.send('Hello World!')` | SSR pages, REST API routes, interactive React UI |
-| No data storage | DynamoDB — transactions + accounts + event log |
-| No logging | Winston → CloudWatch Logs (structured JSON) |
-| No auth/secrets | IAM role + SSM Parameter Store (no hard-coded keys) |
-| No monitoring | CloudWatch alarms, health endpoint, domain event log |
-| 6 lines of code | Full-stack application with resilient AWS architecture |
-
-Your original `app.js` → `GET /` → "Hello World!" is now:
-- `GET /` → redirects to `/dashboard`
-- `GET /dashboard` → SSR financial summary with Recharts
-- `GET /transactions` → paginated transaction ledger + add form
-- `GET /accounts` → account list + balance tracking
-- `GET /api/transactions` → REST endpoint (Zod-validated)
-- `GET /api/accounts` → REST endpoint
-- `GET /api/analytics` → derived metrics
-- `GET /api/health` → DynamoDB connectivity + uptime
+> See which fields are underrepresented, where competition is lowest, and where you have the best shot — for the entire job market, not just individual listings.
 
 ---
 
-## Project Structure
+## What it does
 
-```
-financial-tracker/
-├── src/
-│   ├── app/
-│   │   ├── page.tsx                    # / → redirect to /dashboard
-│   │   ├── layout.tsx                  # Root layout with sidebar nav
-│   │   ├── globals.css                 # Dark luxury design system
-│   │   ├── dashboard/page.tsx          # SSR dashboard (stats + charts)
-│   │   ├── transactions/page.tsx       # SSR transaction list + add form
-│   │   ├── accounts/page.tsx           # SSR account management
-│   │   └── api/
-│   │       ├── transactions/route.ts   # GET list, POST create
-│   │       ├── transactions/[id]/route.ts  # GET, PATCH, DELETE
-│   │       ├── accounts/route.ts       # GET list, POST create
-│   │       ├── analytics/route.ts      # GET dashboard summary
-│   │       └── health/route.ts         # GET health check
-│   ├── components/
-│   │   ├── charts/DashboardCharts.tsx  # Client: Recharts (hydrated)
-│   │   ├── forms/AddTransactionPanel.tsx  # Client: POST form
-│   │   ├── forms/AddAccountPanel.tsx      # Client: POST form
-│   │   └── ui/
-│   │       ├── SideNav.tsx             # Persistent sidebar navigation
-│   │       └── TransactionRow.tsx      # Transaction list item
-│   ├── lib/
-│   │   ├── aws/dynamo.ts               # DynamoDB CRUD + event log
-│   │   ├── analytics.ts                # Pure computation (no DB calls)
-│   │   └── logger.ts                   # Winston + CloudWatch transport
-│   └── types/index.ts                  # All shared TypeScript types
-├── infrastructure/
-│   ├── iam/ec2-role-policy.json        # Least-privilege IAM policy
-│   └── cloudwatch/alarms.yaml          # CloudFormation alarm stack
-├── scripts/
-│   ├── create-tables.sh                # One-time DynamoDB setup
-│   └── bootstrap-ec2.sh               # EC2 user-data install script
-└── .env.example                        # Non-secret config template
-```
+**Dashboard** — Market-wide overview across 15 fields: total openings, average applicants per role, competition rankings, fastest growing fields, and your top 10 opportunities sorted by opportunity score.
+
+**Explore** — Full sortable table of all fields showing openings, applicants/role, competition level, degree requirements, salary, remote ratio, and opportunity score. Click any row to drill in.
+
+**Field Detail** — The LinkedIn-style deep dive:
+- Applicants today vs. total (per field)
+- Degree breakdown: what % of postings require bachelor's vs master's vs no degree
+- Daily applicant volume chart (7-day trend)
+- Salary range with average
+- Entry-level % — how accessible the field is to career changers
+- Competition score vs opportunity score
 
 ---
 
@@ -75,120 +26,100 @@ financial-tracker/
 Browser
   │
   ▼
-EC2 (port 3000, PM2 cluster mode)
+EC2 :3000 (Next.js, systemd-managed)
   │
-  ├── Next.js SSR pages
-  │   ├── /dashboard      — renders stats server-side, hydrates charts client-side
-  │   ├── /transactions   — renders list server-side, form is interactive client-side
-  │   └── /accounts       — same SSR + client pattern
+  ├── /dashboard    — SSR market overview + Recharts (hydrated client-side)
+  ├── /explore      — SSR field comparison table
+  ├── /field?name=  — SSR field detail with degree breakdown
   │
-  └── Next.js API routes (server-only — IAM role handles AWS auth)
-      ├── /api/transactions  ─────────────────────┐
-      ├── /api/accounts      ──── DynamoDB ────────┤  ft-transactions
-      └── /api/analytics                            │  ft-accounts
-                                                   └  ft-events (event log, 90d TTL)
-                                                      ↓
-                                                   CloudWatch Logs
-                                                   /financial-tracker/app
+  └── API Routes (server-only)
+      ├── /api/intelligence  — full market overview JSON
+      ├── /api/search        — job search with inline field intelligence
+      └── /api/health        — liveness check
+          │
+          ├── Adzuna API  ──── circuit breaker + retry + timeout
+          │
+          └── DynamoDB
+              ├── jmi-cache   (10-min TTL, avoids hammering Adzuna)
+              └── jmi-events  (90-day TTL event log)
+                  ↓
+              CloudWatch Logs /jobsignal/app
 ```
-
-### Key design decisions
-
-**No secrets in code** — The EC2 instance's IAM role is the only credential. The AWS SDK picks it up automatically from the EC2 metadata endpoint. You never set `AWS_ACCESS_KEY_ID` on the server.
-
-**SSR + selective hydration** — Pages are rendered server-side (fast first paint, works without JS). Only interactive parts (charts, forms) hydrate on the client.
-
-**Fire-and-forget event log** — Every mutation (transaction created/deleted, account created) is logged asynchronously to `ft-events` in DynamoDB. A DynamoDB write failure for the event log never surfaces to the user.
-
-**DynamoDB single-table design** — Both tables use `PK` (partition key) + `SK` (sort key) entity pattern:
-- `ft-transactions`: `PK = account#<accountId>` / `SK = tx#<txId>`
-- `ft-accounts`: `PK = account#<accountId>` / `SK = meta`
-- `ft-events`: `PK = event#<type>` / `SK = ts#<ISO>`, TTL = 90 days
 
 ---
 
-## Setup Guide
+## Setup
 
-### Step 1 — Create DynamoDB tables (run once)
+### 1. Get a free Adzuna API key
+Sign up at https://developer.adzuna.com — free tier gives 250 requests/day, enough for development.
+
+### 2. Create DynamoDB tables
 ```bash
 AWS_REGION=us-east-1 bash scripts/create-tables.sh
 ```
 
-### Step 2 — Create IAM role and attach policy
-1. Go to IAM → Roles → Create Role → "EC2"
-2. Create an inline policy, paste `infrastructure/iam/ec2-role-policy.json`
-3. Replace `REGION` and `ACCOUNT_ID` with your values
-4. Attach the role to your EC2 instance
+### 3. Deploy to EC2
+- Launch Ubuntu 22.04 EC2 instance
+- Attach your `AdminSDK` IAM role (handles AWS auth automatically)
+- Paste `scripts/bootstrap-ec2.sh` as User Data
+- Open port 80 in security group (Caddy proxies to :3000)
 
-### Step 3 — Launch EC2
-- Amazon Linux 2023 or Ubuntu 22.04 LTS
-- Attach the IAM role created in Step 2
-- Open port 3000 in security group (or 80 behind a load balancer)
-- Paste `scripts/bootstrap-ec2.sh` as **User Data**, or run manually
+### 4. Add Adzuna credentials (after first boot)
+SSH in and add to the env file:
+```bash
+sudo bash -c 'echo "ADZUNA_APP_ID=your_id" >> /etc/jobsignal.env'
+sudo bash -c 'echo "ADZUNA_API_KEY=your_key" >> /etc/jobsignal.env'
+sudo systemctl restart jobsignal
+```
 
-### Step 4 — Local development
+### 5. Local development
 ```bash
 cp .env.example .env.local
-# Set AWS_REGION and ensure ~/.aws/credentials has a profile with DynamoDB access
+# Fill in ADZUNA_APP_ID and ADZUNA_API_KEY
 npm install
-npm run dev        # http://localhost:3000
+npm run dev  # http://localhost:3000
 ```
 
 ---
 
-## API Reference
+## Intelligence model
 
-### Transactions
+**Competition Score (0–100)** — Based on estimated applicants per opening. Lower = less competition = better for you.
 
-| Method | Path | Body / Params |
-|---|---|---|
-| `GET` | `/api/transactions` | `?accountId=&limit=100` |
-| `POST` | `/api/transactions` | `{ accountId, type, category, amount, description, date }` |
-| `GET` | `/api/transactions/:id` | `?accountId=` |
-| `PATCH` | `/api/transactions/:id` | `{ accountId, description?, amount?, category?, date? }` |
-| `DELETE` | `/api/transactions/:id` | `?accountId=` |
+**Opportunity Score (0–100)** — Weighted composite:
+- 40% low competition
+- 30% salary potential
+- 20% entry-level accessibility
+- 10% remote availability
 
-### Accounts
+**Degree Breakdown** — Inferred from job description text. Shows what % of postings in a field actually require a PhD, Master's, Bachelor's, or no degree — so you can see if you're over-qualified or under-qualified before applying.
 
-| Method | Path | Body |
-|---|---|---|
-| `GET` | `/api/accounts` | — |
-| `POST` | `/api/accounts` | `{ name, type, balance?, currency?, color? }` |
-
-### Analytics
-```
-GET /api/analytics
-```
-Returns full `DashboardSummary`: balances, monthly trend (6 months), category breakdown, recent transactions.
-
-### Health
-```
-GET /api/health
-→ 200 { status: "ok", uptime: 3600, services: { dynamodb: "ok" } }
-→ 503 { status: "degraded", services: { dynamodb: "error" } }
-```
+**Applicant Counts** — Modelled from field-level baselines calibrated to realistic LinkedIn-observed ranges. Adzuna's free API doesn't expose exact applicant counts, so we derive realistic estimates that accurately reflect relative competition across fields.
 
 ---
 
-## Environment Variables
+## File Structure
 
-| Variable | Description | Required |
-|---|---|---|
-| `AWS_REGION` | AWS region | Yes |
-| `DYNAMODB_TABLE_TRANSACTIONS` | Transactions table (default: `ft-transactions`) | No |
-| `DYNAMODB_TABLE_ACCOUNTS` | Accounts table (default: `ft-accounts`) | No |
-| `DYNAMODB_TABLE_EVENTS` | Events table (default: `ft-events`) | No |
-| `CLOUDWATCH_LOG_GROUP` | CW log group (default: `/financial-tracker/app`) | No |
-| `NEXT_PUBLIC_CURRENCY` | Display currency (default: `USD`) | No |
-
-> ⚠️ Do **not** set `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` on EC2. The IAM role provides credentials automatically.
-
----
-
-## Transaction Categories
-
-`housing` · `food` · `transport` · `utilities` · `health` · `entertainment` · `shopping` · `savings` · `salary` · `investment` · `freelance` · `other`
-
-## Account Types
-
-`checking` · `savings` · `credit` · `investment` · `cash`
+```
+src/
+├── app/
+│   ├── dashboard/page.tsx      # Market overview (SSR)
+│   ├── explore/page.tsx        # All-fields table (SSR)
+│   ├── field/page.tsx          # Field deep-dive (SSR)
+│   └── api/
+│       ├── intelligence/       # Full market overview
+│       ├── search/             # Job search endpoint
+│       └── health/             # Liveness
+├── components/
+│   ├── charts/
+│   │   ├── MarketCharts.tsx    # Scatter + bar (client)
+│   │   └── FieldCharts.tsx     # Pie + trend + salary (client)
+│   └── ui/TopNav.tsx
+├── lib/
+│   ├── intelligence.ts         # Core analysis engine (pure, no AWS)
+│   ├── search.ts               # Orchestrator with caching
+│   ├── upstream/adzuna.ts      # Adzuna API client
+│   ├── aws/dynamo.ts           # Cache + event log
+│   └── logger.ts               # Winston + CloudWatch
+└── types/index.ts
+```

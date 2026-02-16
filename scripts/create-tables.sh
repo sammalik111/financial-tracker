@@ -1,28 +1,30 @@
 #!/usr/bin/env bash
-# Create the three DynamoDB tables for FinTrack.
-# Run once before first deploy: AWS_REGION=us-east-1 ./scripts/create-tables.sh
 set -euo pipefail
 REGION="${AWS_REGION:-us-east-1}"
-log() { echo "[dynamo] $*"; }
 
 create() {
-  local name="$1" pk="$2" sk="$3"
-  aws dynamodb create-table \
-    --region "$REGION" --table-name "$name" \
-    --attribute-definitions "AttributeName=$pk,AttributeType=S" "AttributeName=$sk,AttributeType=S" \
-    --key-schema "AttributeName=$pk,KeyType=HASH" "AttributeName=$sk,KeyType=RANGE" \
-    --billing-mode PAY_PER_REQUEST \
-    2>/dev/null && log "Created $name" || log "$name already exists"
+  aws dynamodb create-table --region "$REGION" --table-name "$1" \
+    --attribute-definitions AttributeName=PK,AttributeType=S AttributeName=SK,AttributeType=S \
+    --key-schema AttributeName=PK,KeyType=HASH AttributeName=SK,KeyType=RANGE \
+    --billing-mode PAY_PER_REQUEST 2>/dev/null \
+    && echo "Created $1" || echo "$1 already exists"
 }
 
-create ft-transactions PK SK
-create ft-accounts     PK SK
-create ft-events       PK SK
+# jmi-cache uses a single partition key
+aws dynamodb create-table --region "$REGION" --table-name jmi-cache \
+  --attribute-definitions AttributeName=cacheKey,AttributeType=S \
+  --key-schema AttributeName=cacheKey,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST 2>/dev/null \
+  && echo "Created jmi-cache" || echo "jmi-cache already exists"
 
-# Enable TTL on events table
 aws dynamodb update-time-to-live --region "$REGION" \
-  --table-name ft-events \
-  --time-to-live-specification "Enabled=true, AttributeName=ttl" \
-  2>/dev/null && log "TTL enabled on ft-events" || log "TTL already set"
+  --table-name jmi-cache \
+  --time-to-live-specification "Enabled=true,AttributeName=ttl" 2>/dev/null || true
 
-log "✓ Done."
+create jmi-events
+
+aws dynamodb update-time-to-live --region "$REGION" \
+  --table-name jmi-events \
+  --time-to-live-specification "Enabled=true,AttributeName=ttl" 2>/dev/null || true
+
+echo "✓ Tables ready."

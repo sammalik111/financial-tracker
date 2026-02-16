@@ -1,63 +1,121 @@
-#!/usr/bin/env bash
-# EC2 User-Data bootstrap — Amazon Linux 2023 / Ubuntu 22.04
-# Paste this as User Data when launching your EC2 instance.
-# Prerequisites: IAM role with ec2-role-policy.json attached, DynamoDB tables created.
+#!/bin/bash
 set -euo pipefail
-APP_DIR="/opt/fintrack"
-APP_USER="appuser"
-REPO_URL="${REPO_URL:-https://github.com/sammalik111/financial-tracker.git}"
-BRANCH="${BRANCH:-main}"
-REGION="${AWS_REGION:-us-east-1}"
-log() { echo "[bootstrap] $(date -u +%T) $*"; }
 
-# 1. Node.js 20
-log "Installing Node.js 20…"
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash - 2>/dev/null || true
-apt-get install -y nodejs 2>/dev/null || dnf install -y nodejs
+APP_USER="ubuntu"
+APP_NAME="jobsignal"
+APP_DIR="/home/${APP_USER}/my_app"
+APP_PORT="3000"
+REPO_URL="https://github.com/sammalik111/financial-tracker.git"
+REPO_BRANCH="main"
+DOMAIN_NAME=""   # optional
 
-# 2. PM2
-npm install -g pm2
+exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
 
-# 3. CloudWatch agent
-wget -q https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb \
-  -O /tmp/cwa.deb && dpkg -i /tmp/cwa.deb 2>/dev/null || true
+echo "=== BOOTSTRAP START ==="
 
-# 4. App user
-id -u "$APP_USER" &>/dev/null || useradd -r -m -s /bin/bash "$APP_USER"
-mkdir -p "$APP_DIR"
-chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y
+apt-get upgrade -y
+apt-get install -y curl git ca-certificates
 
-# 5. Clone & build
-sudo -u "$APP_USER" bash -c "
-  cd $APP_DIR
-  git clone --branch $BRANCH --depth 1 $REPO_URL . 2>/dev/null || git pull
-  npm ci
-  npm run build
-"
+# ---------------- NODE 20 ----------------
+if ! command -v node >/dev/null; then
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  apt-get install -y nodejs
+fi
+echo "Node: $(node -v) | NPM: $(npm -v)"
 
-# 6. Write env
-cat > "$APP_DIR/.env.production" <<EOF
+# ---------------- CLONE / PULL ----------------
+mkdir -p "${APP_DIR}"
+chown -R ${APP_USER}:${APP_USER} "${APP_DIR}"
+
+if [ ! -d "${APP_DIR}/.git" ]; then
+  sudo -u ${APP_USER} git clone --depth 1 --branch "${REPO_BRANCH}" "${REPO_URL}" "${APP_DIR}"
+else
+  sudo -u ${APP_USER} git -C "${APP_DIR}" fetch --all
+  sudo -u ${APP_USER} git -C "${APP_DIR}" reset --hard origin/${REPO_BRANCH}
+fi
+
+cd "${APP_DIR}"
+
+# ---------------- INSTALL + BUILD ----------------
+sudo -u ${APP_USER} npm ci
+sudo -u ${APP_USER} npm run build
+
+# ---------------- ENV FILE ----------------
+# AWS credentials come from the EC2 IAM role (AdminSDK) automatically.
+# Only non-secret config goes here.
+ENV_FILE="/etc/${APP_NAME}.env"
+cat > "${ENV_FILE}" <<EOF
 NODE_ENV=production
-AWS_REGION=$REGION
-DYNAMODB_TABLE_TRANSACTIONS=ft-transactions
-DYNAMODB_TABLE_ACCOUNTS=ft-accounts
-DYNAMODB_TABLE_EVENTS=ft-events
-CLOUDWATCH_LOG_GROUP=/financial-tracker/app
-NEXT_PUBLIC_APP_NAME=FinTrack
-NEXT_PUBLIC_CURRENCY=USD
-EOF
-chown "$APP_USER:$APP_USER" "$APP_DIR/.env.production"
-
-# 7. PM2
-cat > "$APP_DIR/ecosystem.config.js" <<'EOF'
-module.exports = { apps: [{ name: 'fintrack', script: 'node_modules/.bin/next',
-  args: 'start -p 3000', cwd: '/opt/fintrack', instances: 'max',
-  exec_mode: 'cluster', env_file: '/opt/fintrack/.env.production',
-  out_file: '/opt/fintrack/logs/app.log', error_file: '/opt/fintrack/logs/error.log',
-  merge_logs: true, max_restarts: 10, restart_delay: 3000 }] };
+PORT=${APP_PORT}
+AWS_REGION=us-east-1
+DYNAMODB_TABLE_CACHE=jmi-cache
+DYNAMODB_TABLE_EVENTS=jmi-events
+CLOUDWATCH_LOG_GROUP=/jobsignal/app
+CACHE_TTL_SECONDS=600
+HTTP_TIMEOUT_MS=8000
+HTTP_RETRY_COUNT=3
+NEXT_PUBLIC_APP_NAME=JobSignal
 EOF
 
-sudo -u "$APP_USER" bash -c "cd $APP_DIR && pm2 start ecosystem.config.js && pm2 save"
-pm2 startup systemd -u "$APP_USER" --hp "/home/$APP_USER" | tail -1 | bash || true
+# IMPORTANT: Add your Adzuna credentials here after first boot, then restart:
+# echo "ADZUNA_APP_ID=xxx" >> ${ENV_FILE}
+# echo "ADZUNA_API_KEY=yyy" >> ${ENV_FILE}
+# systemctl restart ${APP_NAME}
 
-log "✓ FinTrack running on port 3000"
+chown root:${APP_USER} "${ENV_FILE}"
+chmod 640 "${ENV_FILE}"
+
+# ---------------- SYSTEMD ----------------
+SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
+cat > "${SERVICE_FILE}" <<EOF
+[Unit]
+Description=JobSignal — Job Market Intelligence
+After=network.target
+
+[Service]
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_DIR}
+EnvironmentFile=${ENV_FILE}
+ExecStart=/usr/bin/npx next start -p ${APP_PORT}
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable ${APP_NAME}
+systemctl start ${APP_NAME}
+
+# ---------------- CADDY ----------------
+apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
+curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt | tee /etc/apt/sources.list.d/caddy-stable.list
+apt-get update -y && apt-get install -y caddy
+
+CADDYFILE="/etc/caddy/Caddyfile"
+if [ -n "$DOMAIN_NAME" ]; then
+  cat > "$CADDYFILE" <<EOF
+$DOMAIN_NAME {
+  reverse_proxy localhost:${APP_PORT}
+}
+EOF
+else
+  cat > "$CADDYFILE" <<EOF
+:80 {
+  reverse_proxy localhost:${APP_PORT}
+}
+EOF
+fi
+
+systemctl enable caddy && systemctl restart caddy
+
+echo "=== BOOTSTRAP COMPLETE — JobSignal running on :${APP_PORT} ==="
