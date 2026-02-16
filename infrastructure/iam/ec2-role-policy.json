@@ -1,0 +1,41 @@
+{
+  "_comment": "Attach to your EC2 instance's IAM role. Replace REGION + ACCOUNT_ID.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DynamoDBTransactions",
+      "Effect": "Allow",
+      "Action": ["dynamodb:PutItem","dynamodb:GetItem","dynamodb:Query",
+                 "dynamodb:UpdateItem","dynamodb:DeleteItem","dynamodb:Scan"],
+      "Resource": [
+        "arn:aws:dynamodb:REGION:ACCOUNT_ID:table/ft-transactions",
+        "arn:aws:dynamodb:REGION:ACCOUNT_ID:table/ft-transactions/index/*"
+      ]
+    },
+    {
+      "Sid": "DynamoDBAccounts",
+      "Effect": "Allow",
+      "Action": ["dynamodb:PutItem","dynamodb:GetItem","dynamodb:Query",
+                 "dynamodb:UpdateItem","dynamodb:Scan"],
+      "Resource": [
+        "arn:aws:dynamodb:REGION:ACCOUNT_ID:table/ft-accounts",
+        "arn:aws:dynamodb:REGION:ACCOUNT_ID:table/ft-accounts/index/*"
+      ]
+    },
+    {
+      "Sid": "DynamoDBEvents",
+      "Effect": "Allow",
+      "Action": ["dynamodb:PutItem","dynamodb:Query"],
+      "Resource": ["arn:aws:dynamodb:REGION:ACCOUNT_ID:table/ft-events"]
+    },
+    {
+      "Sid": "CloudWatchLogs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents","logs:DescribeLogStreams"],
+      "Resource": [
+        "arn:aws:logs:REGION:ACCOUNT_ID:log-group:/financial-tracker/*",
+        "arn:aws:logs:REGION:ACCOUNT_ID:log-group:/financial-tracker/*:*"
+      ]
+    }
+  ]
+}
