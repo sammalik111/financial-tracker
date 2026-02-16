@@ -57,8 +57,18 @@ cd "${APP_DIR}"
 
 # ---------------- INSTALL ----------------
 # NOTE: Do NOT use --omit=dev — Next.js needs devDependencies to build
+# NOTE: Use npm install, not npm ci — repo may not have a package-lock.json
 echo "[5] Installing dependencies..."
-sudo -u ${APP_USER} npm ci || { echo "NPM CI FAILED"; exit 1; }
+
+if [ ! -f "package.json" ]; then
+  echo "ERROR: package.json not found — the repo on GitHub still has the old code."
+  echo "Push the new jobsignal files to GitHub first, then re-run bootstrap."
+  ls -la "${APP_DIR}"
+  exit 1
+fi
+
+echo "package.json found ✔  ($(grep '"name"' package.json || echo 'no name field'))"
+sudo -u ${APP_USER} npm install || { echo "NPM INSTALL FAILED"; exit 1; }
 echo "Node Modules Count: $(ls node_modules | wc -l)"
 
 # ---------------- BUILD ----------------
