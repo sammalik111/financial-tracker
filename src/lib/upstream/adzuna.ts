@@ -14,7 +14,7 @@ axiosRetry(http, {
   retries: RETRIES,
   retryDelay: axiosRetry.exponentialDelay,
   retryCondition: e => axiosRetry.isNetworkError(e) || (e.response?.status ?? 0) >= 500,
-  onRetry: (n, e) => logger.warn('adzuna_retry', { attempt: n, status: e.response?.status }),
+  onRetry: (n, e) => { logger.warn('adzuna_retry', { attempt: n, status: e.response?.status }); },
 });
 
 interface AdzunaJob {
