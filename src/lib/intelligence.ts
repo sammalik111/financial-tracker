@@ -138,7 +138,7 @@ export function buildFieldIntelligence(
   const locationCounts: Record<string, number> = {};
 
   for (const job of jobs) {
-    const deg = inferDegreeRequired(job.description);
+    const deg = job.degreeHint ?? inferDegreeRequired(job.description);
     degreeCounts[deg]++;
 
     const { today, total } = estimateApplicants(job);

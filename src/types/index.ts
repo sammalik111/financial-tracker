@@ -20,6 +20,7 @@ export interface JobListing {
   remote?: boolean;
   contractType?: string;
   experienceLevel?: 'entry' | 'mid' | 'senior' | 'executive';
+  degreeHint?: DegreeLevel;   // structured degree data from JSearch (more accurate than text inference)
 }
 
 // ── Intelligence: per-field market analysis ───────────────────────────────────

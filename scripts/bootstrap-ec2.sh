@@ -107,12 +107,15 @@ HTTP_RETRY_COUNT=3
 NEXT_PUBLIC_APP_NAME=JobSignal
 
 # -------------------------------------------------------
-# IMPORTANT: Add your Adzuna API credentials below.
-# Get free keys at https://developer.adzuna.com
+# IMPORTANT: Add your API credentials below.
 # After adding them, run: sudo systemctl restart jobsignal
+#
+# Adzuna (free tier: 250 req/day)  → https://developer.adzuna.com
+# JSearch/LinkedIn via RapidAPI    → https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch
 # -------------------------------------------------------
 ADZUNA_APP_ID=
 ADZUNA_API_KEY=
+RAPIDAPI_KEY=
 EOF
 
 # AWS credentials come automatically from the EC2 IAM role (AdminSDK).

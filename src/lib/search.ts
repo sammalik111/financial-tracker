@@ -1,6 +1,7 @@
 // src/lib/search.ts
 import { cacheGet, cacheSet, logEvent } from '@/lib/aws/dynamo';
 import { fetchAdzuna } from '@/lib/upstream/adzuna';
+import { fetchJSearch } from '@/lib/upstream/jsearch';
 import { normaliseField, inferExperienceLevel, buildFieldIntelligence } from '@/lib/intelligence';
 import { logger } from '@/lib/logger';
 import type { JobListing, SearchParams, SearchResponse, FieldIntelligence } from '@/types';
@@ -22,7 +23,7 @@ function dedup(jobs: JobListing[]): JobListing[] {
 async function fetchAll(params: SearchParams): Promise<{ jobs: JobListing[]; sources: string[]; partial: boolean }> {
   const results = await Promise.allSettled([
     fetchAdzuna(params),
-    // Add more sources here (jsearch, etc.) following the same pattern
+    fetchJSearch(params),
   ]);
 
   const jobs: JobListing[] = [];
@@ -30,7 +31,7 @@ async function fetchAll(params: SearchParams): Promise<{ jobs: JobListing[]; sou
   let partial = false;
 
   results.forEach((r, i) => {
-    const name = ['adzuna'][i];
+    const name = ['adzuna', 'jsearch'][i];
     if (r.status === 'fulfilled') {
       jobs.push(...r.value.jobs);
       sources.push(name);
